@@ -212,7 +212,7 @@ fn control(
         .child(label)
 }
 
-fn titlebar(t: Theme, toggle: Stateful<Div>) -> Div {
+fn titlebar(t: Theme, controls: [Stateful<Div>; 3]) -> Div {
     div()
         .h_9()
         .flex()
@@ -230,20 +230,19 @@ fn titlebar(t: Theme, toggle: Stateful<Div>) -> Div {
                 .child(div().size_2().rounded_full().bg(rgb(t.accent)))
                 .child(div().text_sm().text_color(rgb(t.muted)).child("Gpuical")),
         )
-        .child(toggle)
-        .child(
-            control(t, "minimize", "–", t.surface, t.text)
-                .window_control_area(WindowControlArea::Min),
-        )
-        .child(
-            control(t, "close", "✕", t.danger, t.bg).window_control_area(WindowControlArea::Close),
-        )
+        .children(controls)
 }
 
 impl Render for Calendar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let light = self.is_light(window);
         let t = if light { LIGHT } else { DARK };
+        let minimize = control(t, "minimize", "–", t.surface, t.text)
+            .cursor_pointer()
+            .on_click(|_, window, _| window.minimize_window());
+        let close = control(t, "close", "✕", t.danger, t.bg)
+            .cursor_pointer()
+            .on_click(|_, window, _| window.remove_window());
         let toggle = control(t, "theme", if light { "☾" } else { "☼" }, t.surface, t.text)
             .cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| {
@@ -435,7 +434,7 @@ impl Render for Calendar {
             .text_color(rgb(t.text))
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, event, _, cx| this.on_key(event, cx)))
-            .child(titlebar(t, toggle))
+            .child(titlebar(t, [toggle, minimize, close]))
             .child(
                 div()
                     .flex_1()
