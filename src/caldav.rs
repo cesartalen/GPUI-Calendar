@@ -156,7 +156,7 @@ impl Client {
             ),
         };
         let ics = format!(
-            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//calendar-gpui//EN\r\nBEGIN:VEVENT\r\n\
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//gpuical//EN\r\nBEGIN:VEVENT\r\n\
              UID:{uid}\r\nDTSTAMP:{}\r\n{start}\r\n{end}\r\n\
              SUMMARY:{summary}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
             Utc::now().format("%Y%m%dT%H%M%SZ"),

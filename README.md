@@ -1,12 +1,12 @@
-# calendar-gpui
+# gpuical
 
 A small desktop calendar built with [GPUI](https://gpui.rs) that syncs over standard CalDAV
 (Radicale, Nextcloud, Baïkal, ...).
 
 ## Config
 
-Create `config.toml` in your config directory (`%APPDATA%\calendar-gpui` on Windows,
-`~/.config/calendar-gpui` on Linux):
+Create `config.toml` in your config directory (`%APPDATA%\gpuical` on Windows,
+`~/.config/gpuical` on Linux):
 
 ```toml
 url = "http://localhost:5232"

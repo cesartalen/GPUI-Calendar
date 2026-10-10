@@ -177,7 +177,7 @@ fn titlebar() -> Div {
                 .px_5()
                 .window_control_area(WindowControlArea::Drag)
                 .child(div().size_2().rounded_full().bg(rgb(ACCENT)))
-                .child(div().text_sm().text_color(rgb(MUTED)).child("Calendar")),
+                .child(div().text_sm().text_color(rgb(MUTED)).child("Gpuical")),
         )
         .child(control("minimize", "–", WindowControlArea::Min, SURFACE, TEXT))
         .child(control("close", "✕", WindowControlArea::Close, DANGER, BG))
@@ -388,7 +388,7 @@ fn main() {
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 titlebar: Some(TitlebarOptions {
-                    title: Some("Calendar".into()),
+                    title: Some("Gpuical".into()),
                     appears_transparent: true,
                     ..Default::default()
                 }),

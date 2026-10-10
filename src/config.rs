@@ -11,7 +11,7 @@ pub struct Config {
 pub fn path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_default()
-        .join("calendar-gpui")
+        .join("gpuical")
         .join("config.toml")
 }
 
