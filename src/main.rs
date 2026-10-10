@@ -109,6 +109,7 @@ impl Calendar {
         match key.key.as_str() {
             "enter" => return self.add(cx),
             "escape" => self.draft = None,
+            "space" => draft.push(' '),
             "backspace" => {
                 draft.pop();
             }
