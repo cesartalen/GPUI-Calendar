@@ -7,18 +7,42 @@ use caldav::Event;
 use chrono::{Datelike, Days, Local, Months, NaiveDate, NaiveTime, TimeDelta};
 use gpui::{
     App, Application, Bounds, Context, Div, ElementId, FocusHandle, FontWeight, KeyDownEvent,
-    Stateful, TitlebarOptions, Window, WindowBounds, WindowControlArea, WindowOptions, div,
+    Stateful, TitlebarOptions, Window, WindowAppearance, WindowBounds, WindowControlArea, WindowOptions, div,
     prelude::*, px, rgb, size,
 };
 use std::{sync::Arc, time::Duration};
 
-const BG: u32 = 0x1e1e2e;
-const MANTLE: u32 = 0x181825;
-const DANGER: u32 = 0xf38ba8;
-const SURFACE: u32 = 0x313244;
-const TEXT: u32 = 0xcdd6f4;
-const MUTED: u32 = 0x6c7086;
-const ACCENT: u32 = 0x89b4fa;
+
+#[derive(Clone, Copy)]
+struct Theme {
+    bg: u32,
+    mantle: u32,
+    surface: u32,
+    text: u32,
+    muted: u32,
+    accent: u32,
+    danger: u32,
+}
+
+const DARK: Theme = Theme {
+    bg: 0x1e1e2e,
+    mantle: 0x181825,
+    surface: 0x313244,
+    text: 0xcdd6f4,
+    muted: 0x6c7086,
+    accent: 0x89b4fa,
+    danger: 0xf38ba8,
+};
+
+const LIGHT: Theme = Theme {
+    bg: 0xeff1f5,
+    mantle: 0xe6e9ef,
+    surface: 0xccd0da,
+    text: 0x4c4f69,
+    muted: 0x6c6f85,
+    accent: 0x1e66f5,
+    danger: 0xd20f39,
+};
 
 const SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
@@ -32,6 +56,7 @@ struct Calendar {
     draft: Option<String>,
     draft_time: Option<NaiveTime>,
     editing: Option<Event>,
+    light: Option<bool>,
     focus: FocusHandle,
 }
 
@@ -45,10 +70,15 @@ impl Calendar {
             client: config.as_ref().ok().map(|c| Arc::new(caldav::Client::new(c))),
             calendars: Vec::new(),
             events: Vec::new(),
-            status: config.err().unwrap_or_default(),
+            status: config.as_ref().err().cloned().unwrap_or_default(),
             draft: None,
             draft_time: None,
             editing: None,
+            light: match config.as_ref().ok().and_then(|c| c.theme.as_deref()) {
+                Some("light") => Some(true),
+                Some("dark") => Some(false),
+                _ => None,
+            },
             focus: cx.focus_handle(),
         };
         this.sync(cx);
@@ -62,6 +92,13 @@ impl Calendar {
         })
         .detach();
         this
+    }
+
+    fn is_light(&self, window: &Window) -> bool {
+        self.light.unwrap_or(matches!(
+            window.appearance(),
+            WindowAppearance::Light | WindowAppearance::VibrantLight
+        ))
     }
 
     fn sync(&mut self, cx: &mut Context<Self>) {
@@ -145,36 +182,42 @@ impl Calendar {
     }
 }
 
-fn button(id: impl Into<ElementId>, label: &'static str) -> Stateful<Div> {
+fn button(t: Theme, id: impl Into<ElementId>, label: &'static str) -> Stateful<Div> {
     div()
         .id(id)
         .px_3()
         .py_1()
         .rounded_md()
         .cursor_pointer()
-        .hover(|s| s.bg(rgb(SURFACE)))
+        .hover(|s| s.bg(rgb(t.surface)))
         .child(label)
 }
 
-fn titlebar() -> Div {
-    let control = |id: &'static str, label: &'static str, area, hover_bg: u32, hover_fg: u32| {
-        div()
-            .id(id)
-            .w_12()
-            .h_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .text_color(rgb(MUTED))
-            .hover(move |s| s.bg(rgb(hover_bg)).text_color(rgb(hover_fg)))
-            .window_control_area(area)
-            .child(label)
-    };
+fn control(
+    t: Theme,
+    id: &'static str,
+    label: &'static str,
+    hover_bg: u32,
+    hover_fg: u32,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .w_12()
+        .h_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_color(rgb(t.muted))
+        .hover(move |s| s.bg(rgb(hover_bg)).text_color(rgb(hover_fg)))
+        .child(label)
+}
+
+fn titlebar(t: Theme, toggle: Stateful<Div>) -> Div {
     div()
         .h_9()
         .flex()
         .items_center()
-        .bg(rgb(MANTLE))
+        .bg(rgb(t.mantle))
         .child(
             div()
                 .flex_1()
@@ -184,15 +227,29 @@ fn titlebar() -> Div {
                 .gap_2()
                 .px_5()
                 .window_control_area(WindowControlArea::Drag)
-                .child(div().size_2().rounded_full().bg(rgb(ACCENT)))
-                .child(div().text_sm().text_color(rgb(MUTED)).child("Gpuical")),
+                .child(div().size_2().rounded_full().bg(rgb(t.accent)))
+                .child(div().text_sm().text_color(rgb(t.muted)).child("Gpuical")),
         )
-        .child(control("minimize", "–", WindowControlArea::Min, SURFACE, TEXT))
-        .child(control("close", "✕", WindowControlArea::Close, DANGER, BG))
+        .child(toggle)
+        .child(
+            control(t, "minimize", "–", t.surface, t.text)
+                .window_control_area(WindowControlArea::Min),
+        )
+        .child(
+            control(t, "close", "✕", t.danger, t.bg).window_control_area(WindowControlArea::Close),
+        )
 }
 
 impl Render for Calendar {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let light = self.is_light(window);
+        let t = if light { LIGHT } else { DARK };
+        let toggle = control(t, "theme", if light { "☾" } else { "☼" }, t.surface, t.text)
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.light = Some(!light);
+                cx.notify();
+            }));
         let today = Local::now().date_naive();
         let start = self.month - Days::new(self.month.weekday().num_days_from_monday() as u64);
 
@@ -207,21 +264,21 @@ impl Render for Calendar {
                     .font_weight(FontWeight::BOLD)
                     .child(self.month.format("%B %Y").to_string()),
             )
-            .child(button("prev", "‹").on_click(cx.listener(|this, _, _, cx| {
+            .child(button(t, "prev", "‹").on_click(cx.listener(|this, _, _, cx| {
                 this.month = this.month - Months::new(1);
                 this.sync(cx);
             })))
-            .child(button("today", "Today").on_click(cx.listener(|this, _, _, cx| {
+            .child(button(t, "today", "Today").on_click(cx.listener(|this, _, _, cx| {
                 this.selected = Local::now().date_naive();
                 this.month = this.selected.with_day(1).unwrap();
                 this.sync(cx);
             })))
-            .child(button("next", "›").on_click(cx.listener(|this, _, _, cx| {
+            .child(button(t, "next", "›").on_click(cx.listener(|this, _, _, cx| {
                 this.month = this.month + Months::new(1);
                 this.sync(cx);
             })));
 
-        let weekdays = div().flex().text_sm().text_color(rgb(MUTED)).children(
+        let weekdays = div().flex().text_sm().text_color(rgb(t.muted)).children(
             ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
                 .map(|d| div().flex_1().flex().justify_center().child(d)),
         );
@@ -243,24 +300,24 @@ impl Render for Calendar {
                         .rounded_full()
                         .cursor_pointer()
                         .when(day.month() != self.month.month(), |d| {
-                            d.text_color(rgb(MUTED))
+                            d.text_color(rgb(t.muted))
                         })
                         .when(day == self.selected, |d| {
-                            d.border_1().border_color(rgb(ACCENT))
+                            d.border_1().border_color(rgb(t.accent))
                         })
                         .when(is_today, |d| {
-                            d.bg(rgb(ACCENT))
-                                .text_color(rgb(BG))
+                            d.bg(rgb(t.accent))
+                                .text_color(rgb(t.bg))
                                 .font_weight(FontWeight::BOLD)
                         })
-                        .when(!is_today, |d| d.hover(|s| s.bg(rgb(SURFACE))))
+                        .when(!is_today, |d| d.hover(|s| s.bg(rgb(t.surface))))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.selected = day;
                             cx.notify();
                         }))
                         .child(day.day().to_string())
                         .when(has_events, |d| {
-                            let dot = if is_today { BG } else { ACCENT };
+                            let dot = if is_today { t.bg } else { t.accent };
                             d.child(div().size_1().rounded_full().bg(rgb(dot)))
                         }),
                 )
@@ -283,11 +340,11 @@ impl Render for Calendar {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().w_16().text_sm().text_color(rgb(MUTED)).child(when))
+                    .child(div().w_16().text_sm().text_color(rgb(t.muted)).child(when))
                     .child(div().flex_1().child(event.summary.clone()))
                     .when(!event.recurring, |d| {
                         let source = event.clone();
-                        d.child(button(("edit", i), "✎").on_click(cx.listener(
+                        d.child(button(t, ("edit", i), "✎").on_click(cx.listener(
                             move |this, _, window, cx| {
                                 this.draft = Some(source.summary.clone());
                                 this.draft_time = (!source.all_day).then(|| source.start.time());
@@ -297,7 +354,7 @@ impl Render for Calendar {
                             },
                         )))
                     })
-                    .child(button(("delete", i), "✕").on_click(cx.listener(
+                    .child(button(t, ("delete", i), "✕").on_click(cx.listener(
                         move |this, _, _, cx| {
                             let event = target.clone();
                             this.run(cx, move |client| client.delete(&event));
@@ -309,7 +366,7 @@ impl Render for Calendar {
             Some(draft) => {
                 let time = self.draft_time;
                 let stepper = |id: &'static str, label: &'static str, minutes: i64| {
-                    button(id, label).on_click(cx.listener(move |this, _, _, cx| {
+                    button(t, id, label).on_click(cx.listener(move |this, _, _, cx| {
                         this.shift_time(minutes, cx)
                     }))
                 };
@@ -318,7 +375,7 @@ impl Render for Calendar {
                     .flex_col()
                     .gap_2()
                     .when(self.editing.is_some(), |d| {
-                        d.child(div().text_xs().text_color(rgb(MUTED)).child(format!(
+                        d.child(div().text_xs().text_color(rgb(t.muted)).child(format!(
                             "Editing · saves to {}",
                             self.selected.format("%a %-d %b")
                         )))
@@ -328,7 +385,7 @@ impl Render for Calendar {
                             .px_3()
                             .py_1()
                             .rounded_md()
-                            .bg(rgb(SURFACE))
+                            .bg(rgb(t.surface))
                             .child(format!("{draft}▏")),
                     )
                     .child(
@@ -336,16 +393,16 @@ impl Render for Calendar {
                             .flex()
                             .items_center()
                             .child(
-                                button("all-day", "All day")
-                                    .when(time.is_none(), |d| d.bg(rgb(SURFACE)))
+                                button(t, "all-day", "All day")
+                                    .when(time.is_none(), |d| d.bg(rgb(t.surface)))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.draft_time = None;
                                         cx.notify();
                                     })),
                             )
                             .child(
-                                button("timed", "Time")
-                                    .when(time.is_some(), |d| d.bg(rgb(SURFACE)))
+                                button(t, "timed", "Time")
+                                    .when(time.is_some(), |d| d.bg(rgb(t.surface)))
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.draft_time = NaiveTime::from_hms_opt(9, 0, 0);
                                         cx.notify();
@@ -360,7 +417,7 @@ impl Render for Calendar {
                             }),
                     )
             }
-            None => div().flex().child(button("new", "+ New").on_click(cx.listener(
+            None => div().flex().child(button(t, "new", "+ New").on_click(cx.listener(
                 |this, _, window, cx| {
                     this.draft = Some(String::new());
                     this.draft_time = None;
@@ -374,11 +431,11 @@ impl Render for Calendar {
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(BG))
-            .text_color(rgb(TEXT))
+            .bg(rgb(t.bg))
+            .text_color(rgb(t.text))
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, event, _, cx| this.on_key(event, cx)))
-            .child(titlebar())
+            .child(titlebar(t, toggle))
             .child(
                 div()
                     .flex_1()
@@ -392,7 +449,7 @@ impl Render for Calendar {
                     .child(
                         div()
                             .text_sm()
-                            .text_color(rgb(MUTED))
+                            .text_color(rgb(t.muted))
                             .child(self.selected.format("%A, %-d %B %Y").to_string()),
                     )
                     .child(div().flex().flex_col().gap_1().children(agenda))
@@ -400,7 +457,7 @@ impl Render for Calendar {
                     .child(
                         div()
                             .text_xs()
-                            .text_color(rgb(MUTED))
+                            .text_color(rgb(t.muted))
                             .child(self.status.clone()),
                     ),
             )

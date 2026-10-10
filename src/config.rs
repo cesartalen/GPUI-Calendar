@@ -6,6 +6,8 @@ pub struct Config {
     pub url: String,
     pub username: String,
     pub password: String,
+    #[serde(default)]
+    pub theme: Option<String>,
 }
 
 pub fn path() -> PathBuf {
