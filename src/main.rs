@@ -7,11 +7,14 @@ use caldav::Event;
 use chrono::{Datelike, Days, Local, Months, NaiveDate, NaiveTime, TimeDelta};
 use gpui::{
     App, Application, Bounds, Context, Div, ElementId, FocusHandle, FontWeight, KeyDownEvent,
-    Stateful, TitlebarOptions, Window, WindowBounds, WindowOptions, div, prelude::*, px, rgb, size,
+    Stateful, TitlebarOptions, Window, WindowBounds, WindowControlArea, WindowOptions, div,
+    prelude::*, px, rgb, size,
 };
 use std::{sync::Arc, time::Duration};
 
 const BG: u32 = 0x1e1e2e;
+const MANTLE: u32 = 0x181825;
+const DANGER: u32 = 0xf38ba8;
 const SURFACE: u32 = 0x313244;
 const TEXT: u32 = 0xcdd6f4;
 const MUTED: u32 = 0x6c7086;
@@ -143,6 +146,41 @@ fn button(id: impl Into<ElementId>, label: &'static str) -> Stateful<Div> {
         .cursor_pointer()
         .hover(|s| s.bg(rgb(SURFACE)))
         .child(label)
+}
+
+fn titlebar() -> Div {
+    let control = |id: &'static str, label: &'static str, area, hover_bg: u32, hover_fg: u32| {
+        div()
+            .id(id)
+            .w_12()
+            .h_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_color(rgb(MUTED))
+            .hover(move |s| s.bg(rgb(hover_bg)).text_color(rgb(hover_fg)))
+            .window_control_area(area)
+            .child(label)
+    };
+    div()
+        .h_9()
+        .flex()
+        .items_center()
+        .bg(rgb(MANTLE))
+        .child(
+            div()
+                .flex_1()
+                .h_full()
+                .flex()
+                .items_center()
+                .gap_2()
+                .px_5()
+                .window_control_area(WindowControlArea::Drag)
+                .child(div().size_2().rounded_full().bg(rgb(ACCENT)))
+                .child(div().text_sm().text_color(rgb(MUTED)).child("Calendar")),
+        )
+        .child(control("minimize", "–", WindowControlArea::Min, SURFACE, TEXT))
+        .child(control("close", "✕", WindowControlArea::Close, DANGER, BG))
 }
 
 impl Render for Calendar {
@@ -310,40 +348,48 @@ impl Render for Calendar {
             .size_full()
             .flex()
             .flex_col()
-            .gap_3()
-            .p_5()
             .bg(rgb(BG))
             .text_color(rgb(TEXT))
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, event, _, cx| this.on_key(event, cx)))
-            .child(header)
-            .child(weekdays)
-            .children(weeks)
+            .child(titlebar())
             .child(
                 div()
-                    .text_sm()
-                    .text_color(rgb(MUTED))
-                    .child(self.selected.format("%A, %-d %B %Y").to_string()),
-            )
-            .child(div().flex().flex_col().gap_1().children(agenda))
-            .child(footer)
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(rgb(MUTED))
-                    .child(self.status.clone()),
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .p_5()
+                    .child(header)
+                    .child(weekdays)
+                    .children(weeks)
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(MUTED))
+                            .child(self.selected.format("%A, %-d %B %Y").to_string()),
+                    )
+                    .child(div().flex().flex_col().gap_1().children(agenda))
+                    .child(footer)
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(rgb(MUTED))
+                            .child(self.status.clone()),
+                    ),
             )
     }
 }
 
 fn main() {
     Application::new().run(|cx: &mut App| {
-        let bounds = Bounds::centered(None, size(px(420.), px(640.)), cx);
+        let bounds = Bounds::centered(None, size(px(420.), px(676.)), cx);
         cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 titlebar: Some(TitlebarOptions {
                     title: Some("Calendar".into()),
+                    appears_transparent: true,
                     ..Default::default()
                 }),
                 ..Default::default()
