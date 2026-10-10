@@ -4,7 +4,7 @@ mod caldav;
 mod config;
 
 use caldav::Event;
-use chrono::{Datelike, Days, Local, Months, NaiveDate};
+use chrono::{Datelike, Days, Local, Months, NaiveDate, NaiveTime, TimeDelta};
 use gpui::{
     App, Application, Bounds, Context, Div, ElementId, FocusHandle, FontWeight, KeyDownEvent,
     Stateful, TitlebarOptions, Window, WindowBounds, WindowOptions, div, prelude::*, px, rgb, size,
@@ -27,6 +27,7 @@ struct Calendar {
     events: Vec<Event>,
     status: String,
     draft: Option<String>,
+    draft_time: Option<NaiveTime>,
     focus: FocusHandle,
 }
 
@@ -42,6 +43,7 @@ impl Calendar {
             events: Vec::new(),
             status: config.err().unwrap_or_default(),
             draft: None,
+            draft_time: None,
             focus: cx.focus_handle(),
         };
         this.sync(cx);
@@ -99,8 +101,16 @@ impl Calendar {
             return;
         };
         let Some(calendar) = self.calendars.first().cloned() else { return };
-        let day = self.selected;
-        self.run(cx, move |client| client.create(&calendar, summary.trim(), day));
+        let (day, time) = (self.selected, self.draft_time);
+        self.run(cx, move |client| client.create(&calendar, summary.trim(), day, time));
+    }
+
+    fn shift_time(&mut self, minutes: i64, cx: &mut Context<Self>) {
+        if let Some(time) = self.draft_time {
+            let delta = TimeDelta::minutes(minutes);
+            self.draft_time = Some(time.overflowing_add_signed(delta).0);
+            cx.notify();
+        }
     }
 
     fn on_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
@@ -238,15 +248,58 @@ impl Render for Calendar {
             });
 
         let footer = match &self.draft {
-            Some(draft) => div()
-                .px_3()
-                .py_1()
-                .rounded_md()
-                .bg(rgb(SURFACE))
-                .child(format!("{draft}▏")),
+            Some(draft) => {
+                let time = self.draft_time;
+                let stepper = |id: &'static str, label: &'static str, minutes: i64| {
+                    button(id, label).on_click(cx.listener(move |this, _, _, cx| {
+                        this.shift_time(minutes, cx)
+                    }))
+                };
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .px_3()
+                            .py_1()
+                            .rounded_md()
+                            .bg(rgb(SURFACE))
+                            .child(format!("{draft}▏")),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .child(
+                                button("all-day", "All day")
+                                    .when(time.is_none(), |d| d.bg(rgb(SURFACE)))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.draft_time = None;
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(
+                                button("timed", "Time")
+                                    .when(time.is_some(), |d| d.bg(rgb(SURFACE)))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.draft_time = NaiveTime::from_hms_opt(9, 0, 0);
+                                        cx.notify();
+                                    })),
+                            )
+                            .when_some(time, |d, time| {
+                                d.child(stepper("hour-down", "−", -60))
+                                    .child(time.format("%H:%M").to_string())
+                                    .child(stepper("hour-up", "+", 60))
+                                    .child(stepper("min-down", "−15", -15))
+                                    .child(stepper("min-up", "+15", 15))
+                            }),
+                    )
+            }
             None => div().flex().child(button("new", "+ New").on_click(cx.listener(
                 |this, _, window, cx| {
                     this.draft = Some(String::new());
+                    this.draft_time = None;
                     window.focus(&this.focus);
                     cx.notify();
                 },

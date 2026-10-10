@@ -18,5 +18,5 @@ password = "password"
 
 - Month view with event markers; agenda for the selected day
 - Syncs on start, on month change, after every change, and every 60 seconds
-- Add all-day events (`+ New`, type a title, Enter) and delete events (`✕`)
+- Add events (`+ New`, type a title, pick all day or a time, Enter) and delete them (`✕`)
 - Recurring events are expanded by the server

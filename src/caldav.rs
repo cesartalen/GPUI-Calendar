@@ -126,19 +126,40 @@ impl Client {
         Ok((calendars, events))
     }
 
-    pub fn create(&self, calendar: &Calendar, summary: &str, day: NaiveDate) -> Result<()> {
+    pub fn create(
+        &self,
+        calendar: &Calendar,
+        summary: &str,
+        day: NaiveDate,
+        time: Option<NaiveTime>,
+    ) -> Result<()> {
         let uid = uuid::Uuid::new_v4();
         let summary = summary
             .replace('\\', "\\\\")
             .replace(';', "\\;")
             .replace(',', "\\,");
+        let utc = |t: NaiveDateTime| {
+            let t = Local.from_local_datetime(&t).earliest().map_or(t, |d| d.naive_utc());
+            t.format("%Y%m%dT%H%M%SZ").to_string()
+        };
+        let (start, end) = match time {
+            Some(time) => {
+                let start = day.and_time(time);
+                (
+                    format!("DTSTART:{}", utc(start)),
+                    format!("DTEND:{}", utc(start + Duration::hours(1))),
+                )
+            }
+            None => (
+                format!("DTSTART;VALUE=DATE:{}", day.format("%Y%m%d")),
+                format!("DTEND;VALUE=DATE:{}", (day + Duration::days(1)).format("%Y%m%d")),
+            ),
+        };
         let ics = format!(
             "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//calendar-gpui//EN\r\nBEGIN:VEVENT\r\n\
-             UID:{uid}\r\nDTSTAMP:{}\r\nDTSTART;VALUE=DATE:{}\r\nDTEND;VALUE=DATE:{}\r\n\
+             UID:{uid}\r\nDTSTAMP:{}\r\n{start}\r\n{end}\r\n\
              SUMMARY:{summary}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
             Utc::now().format("%Y%m%dT%H%M%SZ"),
-            day.format("%Y%m%d"),
-            (day + Duration::days(1)).format("%Y%m%d"),
         );
         let headers = [("Content-Type", "text/calendar; charset=utf-8"), ("If-None-Match", "*")];
         self.request("PUT", &format!("{}{uid}.ics", calendar.href), &headers, &ics)?;
