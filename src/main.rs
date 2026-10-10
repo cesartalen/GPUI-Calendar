@@ -21,7 +21,6 @@ struct Theme {
     text: u32,
     muted: u32,
     accent: u32,
-    danger: u32,
 }
 
 const DARK: Theme = Theme {
@@ -31,7 +30,6 @@ const DARK: Theme = Theme {
     text: 0xcdd6f4,
     muted: 0x6c7086,
     accent: 0x89b4fa,
-    danger: 0xf38ba8,
 };
 
 const LIGHT: Theme = Theme {
@@ -41,8 +39,9 @@ const LIGHT: Theme = Theme {
     text: 0x4c4f69,
     muted: 0x6c6f85,
     accent: 0x1e66f5,
-    danger: 0xd20f39,
 };
+
+const CLOSE_HOVER: u32 = 0xe81123;
 
 const SYNC_INTERVAL: Duration = Duration::from_secs(60);
 
@@ -57,6 +56,7 @@ struct Calendar {
     draft_time: Option<NaiveTime>,
     editing: Option<Event>,
     light: Option<bool>,
+    close_hovered: bool,
     focus: FocusHandle,
 }
 
@@ -79,6 +79,7 @@ impl Calendar {
                 Some("dark") => Some(false),
                 _ => None,
             },
+            close_hovered: false,
             focus: cx.focus_handle(),
         };
         this.sync(cx);
@@ -198,7 +199,6 @@ fn control(
     id: &'static str,
     label: &'static str,
     hover_bg: u32,
-    hover_fg: u32,
 ) -> Stateful<Div> {
     div()
         .id(id)
@@ -208,7 +208,7 @@ fn control(
         .items_center()
         .justify_center()
         .text_color(rgb(t.muted))
-        .hover(move |s| s.bg(rgb(hover_bg)).text_color(rgb(hover_fg)))
+        .hover(move |s| s.bg(rgb(hover_bg)))
         .child(label)
 }
 
@@ -237,13 +237,18 @@ impl Render for Calendar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let light = self.is_light(window);
         let t = if light { LIGHT } else { DARK };
-        let minimize = control(t, "minimize", "–", t.surface, t.text)
+        let minimize = control(t, "minimize", "–", t.surface)
             .cursor_pointer()
             .on_click(|_, window, _| window.minimize_window());
-        let close = control(t, "close", "✕", t.danger, t.bg)
+        let close = control(t, "close", "✕", CLOSE_HOVER)
+            .when(self.close_hovered, |d| d.text_color(rgb(0xffffff)))
             .cursor_pointer()
+            .on_hover(cx.listener(|this, hovered, _, cx| {
+                this.close_hovered = *hovered;
+                cx.notify();
+            }))
             .on_click(|_, window, _| window.remove_window());
-        let toggle = control(t, "theme", if light { "☾" } else { "☼" }, t.surface, t.text)
+        let toggle = control(t, "theme", if light { "☾" } else { "☼" }, t.surface)
             .cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.light = Some(!light);
