@@ -21,6 +21,7 @@ pub struct Event {
     pub start: NaiveDateTime,
     pub end: NaiveDateTime,
     pub all_day: bool,
+    pub recurring: bool,
 }
 
 impl Event {
@@ -134,35 +135,33 @@ impl Client {
         time: Option<NaiveTime>,
     ) -> Result<()> {
         let uid = uuid::Uuid::new_v4();
-        let summary = summary
-            .replace('\\', "\\\\")
-            .replace(';', "\\;")
-            .replace(',', "\\,");
-        let utc = |t: NaiveDateTime| {
-            let t = Local.from_local_datetime(&t).earliest().map_or(t, |d| d.naive_utc());
-            t.format("%Y%m%dT%H%M%SZ").to_string()
-        };
-        let (start, end) = match time {
-            Some(time) => {
-                let start = day.and_time(time);
-                (
-                    format!("DTSTART:{}", utc(start)),
-                    format!("DTEND:{}", utc(start + Duration::hours(1))),
-                )
-            }
-            None => (
-                format!("DTSTART;VALUE=DATE:{}", day.format("%Y%m%d")),
-                format!("DTEND;VALUE=DATE:{}", (day + Duration::days(1)).format("%Y%m%d")),
-            ),
-        };
+        let (start, end) = when(day, time, Duration::hours(1));
         let ics = format!(
             "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//gpuical//EN\r\nBEGIN:VEVENT\r\n\
              UID:{uid}\r\nDTSTAMP:{}\r\n{start}\r\n{end}\r\n\
-             SUMMARY:{summary}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+             SUMMARY:{}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
             Utc::now().format("%Y%m%dT%H%M%SZ"),
+            escape(summary),
         );
         let headers = [("Content-Type", "text/calendar; charset=utf-8"), ("If-None-Match", "*")];
         self.request("PUT", &format!("{}{uid}.ics", calendar.href), &headers, &ics)?;
+        Ok(())
+    }
+
+    pub fn update(
+        &self,
+        event: &Event,
+        summary: &str,
+        day: NaiveDate,
+        time: Option<NaiveTime>,
+    ) -> Result<()> {
+        let kept = event.all_day == time.is_none();
+        let duration = if kept { event.end - event.start } else { Duration::hours(1) };
+        let (start, end) = when(day, time, duration);
+        let ics = self.request("GET", &event.href, &[], "")?;
+        let ics = rewrite(&ics, &escape(summary), &start, &end);
+        let headers = [("Content-Type", "text/calendar; charset=utf-8"), ("If-Match", &event.etag)];
+        self.request("PUT", &event.href, &headers, &ics)?;
         Ok(())
     }
 
@@ -170,6 +169,67 @@ impl Client {
         self.request("DELETE", &event.href, &[("If-Match", &event.etag)], "")?;
         Ok(())
     }
+}
+
+fn escape(text: &str) -> String {
+    text.replace('\\', "\\\\").replace(';', "\\;").replace(',', "\\,")
+}
+
+fn when(day: NaiveDate, time: Option<NaiveTime>, duration: Duration) -> (String, String) {
+    let utc = |t: NaiveDateTime| {
+        let t = Local.from_local_datetime(&t).earliest().map_or(t, |d| d.naive_utc());
+        t.format("%Y%m%dT%H%M%SZ").to_string()
+    };
+    match time {
+        Some(time) => {
+            let start = day.and_time(time);
+            (
+                format!("DTSTART:{}", utc(start)),
+                format!("DTEND:{}", utc(start + duration)),
+            )
+        }
+        None => (
+            format!("DTSTART;VALUE=DATE:{}", day.format("%Y%m%d")),
+            format!(
+                "DTEND;VALUE=DATE:{}",
+                (day + Duration::days(duration.num_days().max(1))).format("%Y%m%d")
+            ),
+        ),
+    }
+}
+
+fn rewrite(ics: &str, summary: &str, start: &str, end: &str) -> String {
+    let ics = ics.replace("\r\n", "\n").replace("\n ", "").replace("\n\t", "");
+    let (mut out, mut in_event, mut in_alarm, mut has_summary) = (Vec::new(), false, false, false);
+    for line in ics.lines() {
+        let name = line.split([':', ';']).next().unwrap_or("");
+        let value = line.split_once(':').map_or("", |(_, v)| v);
+        match (name, in_event && !in_alarm) {
+            ("BEGIN", _) if value == "VEVENT" => in_event = true,
+            ("BEGIN", _) if value == "VALARM" => in_alarm = true,
+            ("END", _) if value == "VALARM" => in_alarm = false,
+            ("END", _) if value == "VEVENT" => {
+                if !has_summary {
+                    out.push(format!("SUMMARY:{summary}"));
+                }
+                in_event = false;
+            }
+            ("SUMMARY", true) => {
+                has_summary = true;
+                out.push(format!("SUMMARY:{summary}"));
+                continue;
+            }
+            ("DTSTART", true) => {
+                out.push(start.into());
+                out.push(end.into());
+                continue;
+            }
+            ("DTEND" | "DURATION", true) => continue,
+            _ => {}
+        }
+        out.push(line.into());
+    }
+    out.join("\r\n") + "\r\n"
 }
 
 fn find<'a>(node: Node<'a, 'a>, ns: &str, name: &str) -> Option<Node<'a, 'a>> {
@@ -198,12 +258,15 @@ fn responses<'a>(doc: &'a Document) -> impl Iterator<Item = (String, Node<'a, 'a
 fn parse_ics(ics: &str, href: &str, etag: &str) -> Vec<Event> {
     let ics = ics.replace("\r\n", "\n").replace("\n ", "").replace("\n\t", "");
     let mut events = Vec::new();
-    let (mut summary, mut start, mut end) = (String::new(), None, None);
+    let (mut summary, mut start, mut end, mut recurring) = (String::new(), None, None, false);
     for line in ics.lines() {
         let Some((key, value)) = line.split_once(':') else { continue };
         let (name, params) = key.split_once(';').unwrap_or((key, ""));
         match name {
-            "BEGIN" if value == "VEVENT" => (summary, start, end) = (String::new(), None, None),
+            "BEGIN" if value == "VEVENT" => {
+                (summary, start, end, recurring) = (String::new(), None, None, false)
+            }
+            "RECURRENCE-ID" => recurring = true,
             "SUMMARY" => {
                 summary = value
                     .replace("\\n", " ")
@@ -227,6 +290,7 @@ fn parse_ics(ics: &str, href: &str, etag: &str) -> Vec<Event> {
                         start,
                         end,
                         all_day,
+                        recurring,
                     });
                 }
             }

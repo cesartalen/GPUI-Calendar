@@ -31,6 +31,7 @@ struct Calendar {
     status: String,
     draft: Option<String>,
     draft_time: Option<NaiveTime>,
+    editing: Option<Event>,
     focus: FocusHandle,
 }
 
@@ -47,6 +48,7 @@ impl Calendar {
             status: config.err().unwrap_or_default(),
             draft: None,
             draft_time: None,
+            editing: None,
             focus: cx.focus_handle(),
         };
         this.sync(cx);
@@ -99,13 +101,16 @@ impl Calendar {
         .detach();
     }
 
-    fn add(&mut self, cx: &mut Context<Self>) {
+    fn save(&mut self, cx: &mut Context<Self>) {
         let Some(summary) = self.draft.take().filter(|d| !d.trim().is_empty()) else {
             return;
         };
-        let Some(calendar) = self.calendars.first().cloned() else { return };
         let (day, time) = (self.selected, self.draft_time);
-        self.run(cx, move |client| client.create(&calendar, summary.trim(), day, time));
+        if let Some(event) = self.editing.take() {
+            self.run(cx, move |client| client.update(&event, summary.trim(), day, time));
+        } else if let Some(calendar) = self.calendars.first().cloned() {
+            self.run(cx, move |client| client.create(&calendar, summary.trim(), day, time));
+        }
     }
 
     fn shift_time(&mut self, minutes: i64, cx: &mut Context<Self>) {
@@ -120,8 +125,11 @@ impl Calendar {
         let Some(draft) = self.draft.as_mut() else { return };
         let key = &event.keystroke;
         match key.key.as_str() {
-            "enter" => return self.add(cx),
-            "escape" => self.draft = None,
+            "enter" => return self.save(cx),
+            "escape" => {
+                self.draft = None;
+                self.editing = None;
+            }
             "space" => draft.push(' '),
             "backspace" => {
                 draft.pop();
@@ -277,6 +285,18 @@ impl Render for Calendar {
                     .gap_2()
                     .child(div().w_16().text_sm().text_color(rgb(MUTED)).child(when))
                     .child(div().flex_1().child(event.summary.clone()))
+                    .when(!event.recurring, |d| {
+                        let source = event.clone();
+                        d.child(button(("edit", i), "✎").on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.draft = Some(source.summary.clone());
+                                this.draft_time = (!source.all_day).then(|| source.start.time());
+                                this.editing = Some(source.clone());
+                                window.focus(&this.focus);
+                                cx.notify();
+                            },
+                        )))
+                    })
                     .child(button(("delete", i), "✕").on_click(cx.listener(
                         move |this, _, _, cx| {
                             let event = target.clone();
@@ -297,6 +317,12 @@ impl Render for Calendar {
                     .flex()
                     .flex_col()
                     .gap_2()
+                    .when(self.editing.is_some(), |d| {
+                        d.child(div().text_xs().text_color(rgb(MUTED)).child(format!(
+                            "Editing · saves to {}",
+                            self.selected.format("%a %-d %b")
+                        )))
+                    })
                     .child(
                         div()
                             .px_3()
